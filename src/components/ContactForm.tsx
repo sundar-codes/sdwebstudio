@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import emailjs from '@emailjs/browser';
-import { Send, Check, Loader2, MessageSquare, AlertCircle } from 'lucide-react';
+import { Send, Check, Loader2, MessageSquare, AlertCircle, Clock } from 'lucide-react';
 import { useToast } from '../hooks/useToast';
 
 const serviceOptions = [
@@ -26,8 +26,11 @@ interface FormErrors {
   budget?: string;
 }
 
+const COOLDOWN_KEY = 'sd_last_inquiry_timestamp';
+const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
 export const ContactForm: React.FC = () => {
-  const { success, error } = useToast();
+  const { success, error, warning } = useToast();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -38,10 +41,65 @@ export const ContactForm: React.FC = () => {
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitState, setSubmitState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [remainingCooldown, setRemainingCooldown] = useState<number>(0);
 
-  // Normalise phone number to 10-digit Indian standard
+  // Monitor 10-minute cooldown
+  useEffect(() => {
+    const checkCooldown = () => {
+      try {
+        const lastTimeStr = localStorage.getItem(COOLDOWN_KEY);
+        if (lastTimeStr) {
+          const lastTime = parseInt(lastTimeStr, 10);
+          const elapsed = Date.now() - lastTime;
+          if (elapsed < COOLDOWN_MS) {
+            setRemainingCooldown(Math.ceil((COOLDOWN_MS - elapsed) / 1000));
+            return;
+          }
+        }
+        setRemainingCooldown(0);
+      } catch {
+        setRemainingCooldown(0);
+      }
+    };
+
+    checkCooldown();
+    const interval = setInterval(checkCooldown, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Format cooldown seconds to "Xm Ys"
+  const formatCooldown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+  };
+
+  // Strictly filter Name: letters and spaces only
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const strictlyWords = e.target.value.replace(/[^A-Za-z\s]/g, '');
+    setName(strictlyWords);
+    if (errors.name) {
+      setErrors((prev) => ({ ...prev, name: undefined }));
+    }
+  };
+
+  // Strictly filter Phone: digits and leading + only
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    // Allow leading +, digits, and spaces
+    let strictlyNumeric = raw.replace(/[^\d+\s]/g, '');
+    // Ensure only one leading + if present
+    if (strictlyNumeric.indexOf('+') > 0) {
+      strictlyNumeric = strictlyNumeric.replace(/\+/g, '');
+    }
+    setPhone(strictlyNumeric);
+    if (errors.phone) {
+      setErrors((prev) => ({ ...prev, phone: undefined }));
+    }
+  };
+
+  // Normalise phone to 10-digit Indian standard
   const normalisePhone = (raw: string): string => {
-    // Strip country code +91 or 91 prefix if user typed it, plus spaces, dashes, parentheses
     let digits = raw.replace(/\D/g, '');
     if (digits.length === 12 && digits.startsWith('91')) {
       digits = digits.slice(2);
@@ -57,15 +115,17 @@ export const ContactForm: React.FC = () => {
     // Validate Name
     const trimmedName = name.trim();
     if (!trimmedName) {
-      newErrors.name = 'Please enter your name.';
+      newErrors.name = 'Please enter your name (letters only).';
     } else if (trimmedName.length < 2) {
       newErrors.name = 'Name must be at least 2 characters.';
+    } else if (!/^[A-Za-z\s]+$/.test(trimmedName)) {
+      newErrors.name = 'Name can only contain alphabetic letters and spaces.';
     }
 
     // Validate Phone
     const cleanPhone = normalisePhone(phone);
     if (!phone.trim()) {
-      newErrors.phone = 'Please enter your WhatsApp number.';
+      newErrors.phone = 'Please enter your WhatsApp mobile number.';
     } else if (cleanPhone.length !== 10) {
       newErrors.phone = 'Enter a valid 10-digit Indian mobile number.';
     } else if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
@@ -74,12 +134,12 @@ export const ContactForm: React.FC = () => {
 
     // Validate Service
     if (!service) {
-      newErrors.service = 'Please select a service requirement.';
+      newErrors.service = 'Please select what service you need.';
     }
 
     // Validate Budget
     if (!budget) {
-      newErrors.budget = 'Please select an estimated budget.';
+      newErrors.budget = 'Please select an estimated budget range.';
     }
 
     return {
@@ -97,6 +157,15 @@ export const ContactForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Check 10-minute rate limiting
+    if (remainingCooldown > 0) {
+      warning(
+        `One enquiry per 10 minutes is allowed. Please wait ${formatCooldown(remainingCooldown)} before sending another.`,
+        'Rate Limit Active'
+      );
+      return;
+    }
+
     setTouched({
       name: true,
       phone: true,
@@ -113,25 +182,30 @@ export const ContactForm: React.FC = () => {
     }
 
     const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID || 'service_wo9a9gs';
-    const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || 'template_1xpncm8';
+    const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || 'template_t3iv7e9';
     const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY || 'mL778sVq-ehYJKVf4';
 
     const cleanPhone = normalisePhone(phone);
 
-    // Timeline inference based on budget/service for existing template contract
     let estimatedTimeline = '2–3 Weeks';
     if (budget === 'Below ₹2,000') estimatedTimeline = '1–2 Weeks';
     else if (budget === '₹3,000 – ₹5,000') estimatedTimeline = '2–3 Weeks';
     else if (budget === '₹5,000 – ₹10,000') estimatedTimeline = '3–4 Weeks';
     else if (budget === '₹10,000+') estimatedTimeline = '4+ Weeks';
 
+    // Comprehensive parameter contract mapping to ensure template_t3iv7e9 delivers to mail
     const templateParams = {
       from_name: name.trim(),
-      reply_to: '',
+      name: name.trim(),
+      reply_to: 'sundaresan.codes@gmail.com',
+      email: 'sundaresan.codes@gmail.com',
       phone_no: cleanPhone,
+      phone: cleanPhone,
+      service: service,
       budget: budget,
       timeline: estimatedTimeline,
-      message: `Selected Service: ${service}\nAdditional Details: ${details.trim() || 'No additional details provided.'}`,
+      message: `Selected Service: ${service}\nEstimated Budget: ${budget}\nTimeline: ${estimatedTimeline}\nAdditional Details: ${details.trim() || 'No additional details provided.'}`,
+      details: details.trim() || 'No additional details provided.',
     };
 
     setSubmitState('sending');
@@ -141,9 +215,17 @@ export const ContactForm: React.FC = () => {
 
       setSubmitState('sent');
       success(
-        "Enquiry sent successfully! We'll get back to you shortly.",
+        "Enquiry sent successfully! We'll review your project and get back to you.",
         'Message Delivered'
       );
+
+      // Record cooldown timestamp in localStorage
+      try {
+        localStorage.setItem(COOLDOWN_KEY, Date.now().toString());
+        setRemainingCooldown(COOLDOWN_MS / 1000);
+      } catch {
+        // LocalStorage fallback
+      }
 
       // Reset fields after confirmed delivery
       setName('');
@@ -161,13 +243,12 @@ export const ContactForm: React.FC = () => {
       console.error('EmailJS submission error:', err);
       setSubmitState('idle');
       error(
-        "Something went wrong. Your enquiry couldn't be sent. Please try again.",
+        "Something went wrong while delivering your enquiry. Please try again or reach out on WhatsApp.",
         'Delivery Failed'
       );
     }
   };
 
-  // WhatsApp prefilled link generation
   const handleWhatsAppDirect = (e: React.MouseEvent) => {
     e.preventDefault();
 
@@ -194,7 +275,7 @@ export const ContactForm: React.FC = () => {
 
   return (
     <section id="contact" className="py-20 sm:py-28 px-5 sm:px-8 border-t border-white/[0.05] relative">
-      {/* Background Subtle Ambient Glow */}
+      {/* Background Ambient Glow */}
       <div
         className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[350px] sm:w-[500px] h-[350px] bg-[#9986B3]/[0.04] rounded-full blur-[120px] pointer-events-none"
         aria-hidden="true"
@@ -214,28 +295,43 @@ export const ContactForm: React.FC = () => {
           </p>
         </div>
 
+        {/* 10-Minute Cooldown Notification Banner if Active */}
+        {remainingCooldown > 0 && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-950/40 border border-[#C2A878]/30 flex items-center gap-3 backdrop-blur-md">
+            <Clock className="w-5 h-5 text-[#C2A878] shrink-0 animate-pulse" />
+            <div className="flex-1">
+              <h4 className="font-sans text-xs font-semibold text-[#FDFCFB] tracking-wide uppercase">
+                Enquiry Rate Limit Active
+              </h4>
+              <p className="font-sans text-xs text-[#9CA3AF] mt-0.5">
+                To prevent spam, submissions are limited to one enquiry every 10 minutes. Available in:{' '}
+                <span className="font-mono text-[#C2A878] font-bold">
+                  {formatCooldown(remainingCooldown)}
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Compact Form Card */}
         <div className="bg-[#0A0A0C] border border-white/[0.07] rounded-3xl p-6 sm:p-9 shadow-2xl backdrop-blur-md">
           <form onSubmit={handleSubmit} noValidate className="space-y-4 sm:space-y-5">
-            {/* Name Field */}
+            {/* Name Field (Strictly Letters and Spaces) */}
             <div>
               <label
                 htmlFor="client-name"
                 className="block font-sans text-[11px] uppercase tracking-[0.16em] text-[#9CA3AF] mb-1.5 font-medium"
               >
-                Your Name <span className="text-[#C2A878]">*</span>
+                Your Name <span className="text-[#C2A878]">* (Letters only)</span>
               </label>
               <input
                 id="client-name"
                 type="text"
                 value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
-                }}
+                onChange={handleNameChange}
                 onBlur={() => handleBlur('name')}
                 placeholder="e.g. Anand Kumar"
-                disabled={submitState === 'sending'}
+                disabled={submitState === 'sending' || remainingCooldown > 0}
                 className={`w-full bg-[#050506] border rounded-xl px-4 py-3 text-sm text-[#FDFCFB] placeholder-white/20 font-sans transition-colors focus:outline-none ${
                   touched.name && errors.name
                     ? 'border-rose-500/80 focus:border-rose-500'
@@ -250,26 +346,24 @@ export const ContactForm: React.FC = () => {
               )}
             </div>
 
-            {/* WhatsApp Number Field */}
+            {/* WhatsApp Number Field (Strictly Digits) */}
             <div>
               <label
                 htmlFor="client-phone"
                 className="block font-sans text-[11px] uppercase tracking-[0.16em] text-[#9CA3AF] mb-1.5 font-medium"
               >
-                WhatsApp Number <span className="text-[#C2A878]">*</span>
+                WhatsApp Number <span className="text-[#C2A878]">* (10 Digits)</span>
               </label>
               <div className="relative">
                 <input
                   id="client-phone"
                   type="tel"
+                  inputMode="numeric"
                   value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value);
-                    if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
-                  }}
+                  onChange={handlePhoneChange}
                   onBlur={() => handleBlur('phone')}
-                  placeholder="e.g. 98435 99030 or +91 9843599030"
-                  disabled={submitState === 'sending'}
+                  placeholder="e.g. 7904140120 or +91 7904140120"
+                  disabled={submitState === 'sending' || remainingCooldown > 0}
                   className={`w-full bg-[#050506] border rounded-xl px-4 py-3 text-sm text-[#FDFCFB] placeholder-white/20 font-sans transition-colors focus:outline-none ${
                     touched.phone && errors.phone
                       ? 'border-rose-500/80 focus:border-rose-500'
@@ -308,7 +402,7 @@ export const ContactForm: React.FC = () => {
                       if (errors.service) setErrors((prev) => ({ ...prev, service: undefined }));
                     }}
                     onBlur={() => handleBlur('service')}
-                    disabled={submitState === 'sending'}
+                    disabled={submitState === 'sending' || remainingCooldown > 0}
                     className={`w-full bg-[#050506] border rounded-xl px-4 py-3 text-sm font-sans transition-colors focus:outline-none appearance-none cursor-pointer ${
                       !service ? 'text-white/30' : 'text-[#FDFCFB]'
                     } ${
@@ -352,7 +446,7 @@ export const ContactForm: React.FC = () => {
                       if (errors.budget) setErrors((prev) => ({ ...prev, budget: undefined }));
                     }}
                     onBlur={() => handleBlur('budget')}
-                    disabled={submitState === 'sending'}
+                    disabled={submitState === 'sending' || remainingCooldown > 0}
                     className={`w-full bg-[#050506] border rounded-xl px-4 py-3 text-sm font-sans transition-colors focus:outline-none appearance-none cursor-pointer ${
                       !budget ? 'text-white/30' : 'text-[#FDFCFB]'
                     } ${
@@ -399,26 +493,33 @@ export const ContactForm: React.FC = () => {
                 maxLength={500}
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
-                placeholder="Briefly describe your business, timeline, or any specific reference sites you admire..."
-                disabled={submitState === 'sending'}
+                placeholder="Briefly describe your requirements or any reference sites..."
+                disabled={submitState === 'sending' || remainingCooldown > 0}
                 className="w-full bg-[#050506] border border-white/10 focus:border-[#9986B3] rounded-xl px-4 py-3 text-sm text-[#FDFCFB] placeholder-white/20 font-sans transition-colors focus:outline-none resize-none"
               />
             </div>
 
-            {/* Form Submit Action with 3 visible states */}
+            {/* Form Submit Action with 3 visible states + 10-minute cooldown state */}
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={submitState === 'sending'}
+                disabled={submitState === 'sending' || remainingCooldown > 0}
                 className={`w-full py-3.5 rounded-full font-sans text-xs tracking-[0.18em] uppercase font-semibold transition-all duration-300 flex items-center justify-center gap-2 border ${
-                  submitState === 'sent'
+                  remainingCooldown > 0
+                    ? 'bg-white/[0.04] text-[#9CA3AF]/50 border-white/10 cursor-not-allowed'
+                    : submitState === 'sent'
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : submitState === 'sending'
                     ? 'bg-[#C2A878]/20 text-[#C2A878] border-[#C2A878]/40 cursor-wait'
                     : 'bg-[#FDFCFB] text-[#050506] border-[#FDFCFB] hover:bg-[#9986B3] hover:text-[#050506] hover:border-[#9986B3] shadow-lg shadow-white/5'
                 }`}
               >
-                {submitState === 'sent' ? (
+                {remainingCooldown > 0 ? (
+                  <>
+                    <Clock className="w-4 h-4 text-[#C2A878]" />
+                    <span>Please Wait ({formatCooldown(remainingCooldown)})</span>
+                  </>
+                ) : submitState === 'sent' ? (
                   <>
                     <Check className="w-4 h-4 text-emerald-400" />
                     <span>Enquiry Sent ✓</span>
