@@ -8,6 +8,8 @@ export interface Project {
   isLive: boolean;
   featured: boolean;
   tag?: string;
+  isPrivate?: boolean;
+  statusNote?: string;
 }
 
 export const projects: Project[] = [
@@ -17,11 +19,10 @@ export const projects: Project[] = [
     category: 'Business Website',
     description: 'A neighborhood grocery and provisions storefront in Coimbatore featuring store timings, location directions, and quick inquiries.',
     image: '/projects/murugan-store.webp',
-    // Editable placeholder URL until final custom domain/deployment is linked
-    url: 'https://sri-murugan-store.vercel.app',
-    isLive: false,
+    url: 'https://sri-murugan-store.pages.dev',
+    isLive: true,
     featured: true,
-    tag: 'Coimbatore, IN',
+    tag: 'Live Website',
   },
   {
     id: 'rockey-chicken',
@@ -29,11 +30,11 @@ export const projects: Project[] = [
     category: 'Business Website',
     description: 'Clean business website for a fresh meat retailer in Press Colony, featuring live opening/closing status, product offerings, and one-tap directions.',
     image: '/projects/rockey-chicken.jpg',
-    // Editable placeholder URL until final custom domain/deployment is linked
     url: 'https://the-raakky-chicken.vercel.app',
     isLive: false,
     featured: true,
-    tag: 'Coimbatore, IN',
+    tag: 'Under Review',
+    statusNote: 'Under Client Review',
   },
   {
     id: 'moonwoven-loops',
@@ -44,28 +45,31 @@ export const projects: Project[] = [
     url: 'https://moonwoven-loops-catlog.pages.dev/',
     isLive: true,
     featured: true,
-    tag: 'Live Client',
+    tag: 'Live Catalog',
   },
   {
     id: 'sd-pos',
     name: 'SD POS',
     category: 'Custom Web Application',
-    description: 'A fast, distraction-free point-of-sale web application and billing dashboard designed for real shop counter workflows and invoice previews.',
+    description: 'A fast, distraction-free point-of-sale web application and billing dashboard designed for real shop counter workflows. Built for private business use.',
     image: '/projects/sd-pos.png',
     url: 'https://sd-pos-seven.vercel.app/',
-    isLive: true,
+    isLive: false,
     featured: false,
-    tag: 'Web Application',
+    tag: 'Private System',
+    isPrivate: true,
+    statusNote: 'Internal Tool / Confidential',
   },
   {
     id: 'velvet',
     name: 'Velvet',
     category: 'Fashion Showcase',
-    description: 'An editorial design showcase exploring editorial typography, dark aesthetics, and seamless fluid transitions.',
+    description: 'An experimental design showcase exploring editorial typography, dark aesthetics, and seamless fluid transitions.',
     image: '/projects/velvet.png',
     url: 'https://sundar-codes.github.io/Velvet/',
     isLive: true,
     featured: false,
-    tag: 'Studio Showcase',
+    tag: 'Test Showcase',
+    statusNote: 'Concept Playground',
   },
 ];
