@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sdwebstudio.vercel.app/sitemap.xml
